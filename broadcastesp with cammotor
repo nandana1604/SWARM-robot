@@ -1,0 +1,230 @@
+// Include necessary libraries
+#include <WiFi.h>
+#include <esp_now.h>
+#include "esp_camera.h"
+
+// Motor control pins
+#define MOTOR_A1 17          // Motor direction pin A1
+#define MOTOR_A2 18          // Motor direction pin A2
+#define ENA      5           // Motor speed control (PWM)
+#define STATUS_LED 4         // Status LED pin
+
+// Camera pin configuration for OV2640
+#define PWDN_GPIO_NUM     -1
+#define RESET_GPIO_NUM    -1
+#define XCLK_GPIO_NUM     21
+#define SIOD_GPIO_NUM     26
+#define SIOC_GPIO_NUM     27
+#define Y9_GPIO_NUM       35
+#define Y8_GPIO_NUM       34
+#define Y7_GPIO_NUM       39
+#define Y6_GPIO_NUM       36
+#define Y5_GPIO_NUM       19
+#define Y4_GPIO_NUM       18
+#define Y3_GPIO_NUM        5
+#define Y2_GPIO_NUM        4
+#define VSYNC_GPIO_NUM    25
+#define HREF_GPIO_NUM     23
+#define PCLK_GPIO_NUM     22
+
+// Global state variables
+String lastMessage = "";
+uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; // Broadcast to all
+
+// Helper function to format MAC address to string
+void formatMacAddress(const uint8_t *macAddr, char *buffer, int maxLength) {
+  snprintf(buffer, maxLength, "%02x:%02x:%02x:%02x:%02x:%02x",
+           macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
+}
+
+// Called when a message is received via ESP-NOW
+void receiveCallback(const esp_now_recv_info_t *recv_info, const uint8_t *data, int dataLen) {
+  char buffer[ESP_NOW_MAX_DATA_LEN + 1];
+  int msgLen = min(ESP_NOW_MAX_DATA_LEN, dataLen);
+  strncpy(buffer, (const char *)data, msgLen);
+  buffer[msgLen] = 0;
+  char macStr[18];
+  formatMacAddress(recv_info->src_addr, macStr, sizeof(macStr));
+  Serial.printf("Received from %s: %s\n", macStr, buffer);
+  lastMessage = String(buffer);
+
+  // Respond to ON/OFF commands
+  if (lastMessage.equals("ON")) {
+    digitalWrite(STATUS_LED, HIGH);
+  } else if (lastMessage.equals("OFF")) {
+    digitalWrite(STATUS_LED, LOW);
+  }
+}
+
+// Called after sending a message to check delivery status
+void sentCallback(const uint8_t *macAddr, esp_now_send_status_t status) {
+  char macStr[18];
+  formatMacAddress(macAddr, macStr, sizeof(macStr));
+  Serial.printf("Last Packet Sent to: %s - Status: %s\n", macStr, status == ESP_NOW_SEND_SUCCESS ? "Success" : "Fail");
+}
+
+// Broadcast a message using ESP-NOW
+void broadcast(const String &message) {
+  esp_err_t result = esp_now_send(broadcastAddress, (const uint8_t *)message.c_str(), message.length());
+  if (result == ESP_OK) {
+    Serial.printf("Broadcast Sent: %s\n", message.c_str());
+  } else {
+    Serial.printf("Broadcast Failed (Error Code: %d)\n", result);
+  }
+}
+
+// Initialize motor control pins
+void setupMotors() {
+  pinMode(MOTOR_A1, OUTPUT);
+  pinMode(MOTOR_A2, OUTPUT);
+  pinMode(ENA, OUTPUT);
+  analogWrite(ENA, 200);  // Set speed
+}
+
+// Move robot forward
+void moveForward() {
+  digitalWrite(MOTOR_A1, HIGH);
+  digitalWrite(MOTOR_A2, LOW);
+}
+
+// Turn robot left
+void turnLeft() {
+  digitalWrite(MOTOR_A1, LOW);
+  digitalWrite(MOTOR_A2, HIGH);
+  delay(300);
+  stopMotors();
+}
+
+// Turn robot right
+void turnRight() {
+  digitalWrite(MOTOR_A1, HIGH);
+  digitalWrite(MOTOR_A2, LOW);
+  delay(300);
+  stopMotors();
+}
+
+// Stop the robot
+void stopMotors() {
+  digitalWrite(MOTOR_A1, LOW);
+  digitalWrite(MOTOR_A2, LOW);
+}
+
+// Initialize the OV2640 camera
+bool setupCamera() {
+  camera_config_t config;
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer = LEDC_TIMER_0;
+  config.pin_d0 = Y2_GPIO_NUM;
+  config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM;
+  config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM;
+  config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM;
+  config.pin_d7 = Y9_GPIO_NUM;
+  config.pin_xclk = XCLK_GPIO_NUM;
+  config.pin_pclk = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href = HREF_GPIO_NUM;
+  config.pin_sscb_sda = SIOD_GPIO_NUM;
+  config.pin_sscb_scl = SIOC_GPIO_NUM;
+  config.pin_pwdn = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
+  config.xclk_freq_hz = 20000000;
+  config.pixel_format = PIXFORMAT_GRAYSCALE; // Use grayscale for tracking
+  config.frame_size = FRAMESIZE_QQVGA;       // 160x120 resolution
+  config.fb_count = 1;
+  return esp_camera_init(&config) == ESP_OK;
+}
+
+// Capture and analyze image frame for tracking
+void processFrame() {
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (!fb) {
+    Serial.println("Camera capture failed");
+    return;
+  }
+
+  int width = fb->width;
+  int height = fb->height;
+  uint8_t *img = fb->buf;
+  int leftSum = 0, rightSum = 0;
+
+  // Analyze middle rows of the image for line contrast
+  for (int y = 40; y < 80; y++) {
+    for (int x = 0; x < width; x++) {
+      uint8_t pixel = img[y * width + x];
+      if (pixel < 100) { // Dark pixel (part of the line or object)
+        if (x < width / 2)
+          leftSum++;
+        else
+          rightSum++;
+      }
+    }
+  }
+
+  // Print analysis results
+  Serial.printf("Left: %d | Right: %d\n", leftSum, rightSum);
+
+  // Decide motion based on pixel distribution
+  if (leftSum > rightSum + 20) {
+    Serial.println("Turning LEFT");
+    turnLeft();
+    broadcast("LEFT");
+  } else if (rightSum > leftSum + 20) {
+    Serial.println("Turning RIGHT");
+    turnRight();
+    broadcast("RIGHT");
+  } else if (leftSum + rightSum > 100) {
+    Serial.println("Moving FORWARD");
+    moveForward();
+    broadcast("FORWARD");
+  } else {
+    Serial.println("STOP");
+    stopMotors();
+    broadcast("STOP");
+  }
+  esp_camera_fb_return(fb); // Release frame buffer
+}
+
+// Initialization code
+void setup() {
+  Serial.begin(115200);
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect(); // Stop any existing connections
+
+  // Initialize ESP-NOW
+  if (esp_now_init() == ESP_OK) {
+    Serial.println("ESP_NOW Init Success");
+    esp_now_register_recv_cb(receiveCallback);
+    esp_now_register_send_cb(sentCallback);
+    esp_now_peer_info_t peerInfo = {};
+    memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+    peerInfo.channel = 0;
+    peerInfo.encrypt = false;
+    esp_now_add_peer(&peerInfo);
+  } else {
+    Serial.println("ESP-NOW Init Failed");
+    delay(3000);
+    ESP.restart();
+  }
+
+  // Init pins
+  pinMode(STATUS_LED, OUTPUT);
+  digitalWrite(STATUS_LED, LOW);
+  setupMotors();
+
+  // Initialize camera
+  if (setupCamera()) {
+    Serial.println("Camera initialized");
+    digitalWrite(STATUS_LED, HIGH);
+  } else {
+    Serial.println("Camera init failed");
+  }
+}
+
+// Continuously process image frames for tracking
+void loop() {
+  processFrame();
+  delay(300); // Frame processing delay
+}
