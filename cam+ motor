@@ -1,0 +1,155 @@
+#include "esp_camera.h"
+#include <ArduinoJson.h>
+
+// Motor Pins (L298N)
+#define MOTOR_A1 17
+#define MOTOR_A2 18
+#define ENA      5
+
+// Optional status LED
+#define STATUS_LED 4
+
+// Camera pin config for OV2640 (adjust if different)
+#define PWDN_GPIO_NUM     -1
+#define RESET_GPIO_NUM    -1
+#define XCLK_GPIO_NUM     21
+#define SIOD_GPIO_NUM     26
+#define SIOC_GPIO_NUM     27
+#define Y9_GPIO_NUM       35
+#define Y8_GPIO_NUM       34
+#define Y7_GPIO_NUM       39
+#define Y6_GPIO_NUM       36
+#define Y5_GPIO_NUM       19
+#define Y4_GPIO_NUM       18
+#define Y3_GPIO_NUM        5
+#define Y2_GPIO_NUM        4
+#define VSYNC_GPIO_NUM    25
+#define HREF_GPIO_NUM     23
+#define PCLK_GPIO_NUM     22
+
+void setupMotors() {
+  pinMode(MOTOR_A1, OUTPUT);
+  pinMode(MOTOR_A2, OUTPUT);
+  pinMode(ENA, OUTPUT);
+  analogWrite(ENA, 200);  // Set speed
+}
+
+void moveForward() {
+  digitalWrite(MOTOR_A1, HIGH);
+  digitalWrite(MOTOR_A2, LOW);
+}
+
+void turnLeft() {
+  digitalWrite(MOTOR_A1, LOW);
+  digitalWrite(MOTOR_A2, HIGH);
+  delay(300);
+  stopMotors();
+}
+
+void turnRight() {
+  digitalWrite(MOTOR_A1, HIGH);
+  digitalWrite(MOTOR_A2, LOW);
+  delay(300);
+  stopMotors();
+}
+
+void stopMotors() {
+  digitalWrite(MOTOR_A1, LOW);
+  digitalWrite(MOTOR_A2, LOW);
+}
+
+// Initialize OV2640 camera
+bool setupCamera() {
+  camera_config_t config;
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer = LEDC_TIMER_0;
+  config.pin_d0 = Y2_GPIO_NUM;
+  config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM;
+  config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM;
+  config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM;
+  config.pin_d7 = Y9_GPIO_NUM;
+  config.pin_xclk = XCLK_GPIO_NUM;
+  config.pin_pclk = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href = HREF_GPIO_NUM;
+  config.pin_sscb_sda = SIOD_GPIO_NUM;
+  config.pin_sscb_scl = SIOC_GPIO_NUM;
+  config.pin_pwdn = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
+  config.xclk_freq_hz = 20000000;
+  config.pixel_format = PIXFORMAT_GRAYSCALE; // Light-weight for tracking
+
+  config.frame_size = FRAMESIZE_QQVGA; // 160x120
+  config.fb_count = 1;
+
+  esp_err_t err = esp_camera_init(&config);
+  return err == ESP_OK;
+}
+
+// Analyze frame and move
+void processFrame() {
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (!fb) {
+    Serial.println("Camera capture failed");
+    return;
+  }
+
+  int width = fb->width;
+  int height = fb->height;
+  uint8_t *img = fb->buf;
+
+  // Center detection logic
+  int leftSum = 0, rightSum = 0;
+
+  for (int y = 40; y < 80; y++) {  // Middle rows
+    for (int x = 0; x < width; x++) {
+      uint8_t pixel = img[y * width + x];
+      if (pixel < 100) { // Dark object threshold
+        if (x < width / 2)
+          leftSum++;
+        else
+          rightSum++;
+      }
+    }
+  }
+
+  Serial.printf("Left: %d | Right: %d\n", leftSum, rightSum);
+
+  if (leftSum > rightSum + 20) {
+    Serial.println("Turning LEFT");
+    turnLeft();
+  } else if (rightSum > leftSum + 20) {
+    Serial.println("Turning RIGHT");
+    turnRight();
+  } else if (leftSum + rightSum > 100) {
+    Serial.println("Moving FORWARD");
+    moveForward();
+  } else {
+    Serial.println("STOP");
+    stopMotors();
+  }
+
+  esp_camera_fb_return(fb);
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(STATUS_LED, OUTPUT);
+  digitalWrite(STATUS_LED, LOW);
+
+  setupMotors();
+  if (setupCamera()) {
+    Serial.println("Camera initialized");
+    digitalWrite(STATUS_LED, HIGH);
+  } else {
+    Serial.println("Camera init failed");
+  }
+}
+
+void loop() {
+  processFrame();
+  delay(300);  // Adjust for smoother behavior
+}
