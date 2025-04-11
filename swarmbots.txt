@@ -1,0 +1,95 @@
+🔹 1. Hardware Architecture  
+Each robot unit is a mobile platform with the following features:
+
+- Microcontroller or SBC (e.g., STM32, ESP32, Raspberry Pi Zero): Handles onboard computation and communication.  
+- Motors & Encoders: Two motors (differential drive) for movement and direction control.  
+- Sensors:  
+  - Line following sensors or LIDAR/IR for navigation.  
+  - Proximity sensors for collision avoidance.  
+- Wireless Modules: Typically Wi-Fi (ESP-NOW or mesh) to communicate with other agents or a central server.  
+- Battery-powered: Robots are untethered and designed to run autonomously.
+
+🔹 2. Swarm Intelligence Algorithm  
+Swarm robotics is modeled after biological systems like ant colonies or bee hives. Key concepts used:
+
+- Local decision-making: Each robot operates on partial data, without a centralized controller.  
+- Self-organization: Robots form dynamic formations, avoid traffic, and organize tasks by collaborating.  
+- Stigmergy: Robots may leave markers (e.g., via messages or visible tokens) that influence the behavior of others.
+
+Common algorithms:  
+- Finite state machines for task logic.  
+- Boid-style movement for collision avoidance (alignment, cohesion, separation).  
+- Leader-follower dynamics in crowded environments.
+
+🔹 3. Task Allocation System  
+Robots work in a simulated warehouse where tasks involve picking and delivering packages. Task assignment can use:
+
+- Market-based bidding: Each robot “bids” for a task based on its proximity and availability.  
+- Greedy heuristics: Robot takes the nearest available task.  
+- Broadcast assignment: A master node (or elected leader) distributes tasks.  
+- Token-passing: A logical token determines which robot can take a task.
+
+Tasks are dynamically updated based on system load, traffic, or task completion.
+
+🔹 4. Path Planning and Motion  
+Each robot must navigate the warehouse grid to pick up and deliver items. The methods used include:
+
+- A* Algorithm: Calculates shortest path between current position and goal node.  
+- Real-time re-routing: If path is blocked (by other robots or obstacles), the robot recalculates a new path.  
+- Traffic management: Robots slow down or yield at intersections to prevent collisions.  
+- Grid localization: Robots track position on a 2D matrix map, possibly using odometry or QR tags.
+
+🔹 5. Communication Protocol  
+Robots communicate peer-to-peer or with a central node. Communication is lightweight to reduce bandwidth usage:
+
+- ESP-NOW or Wi-Fi (UDP/TCP packets).  
+- Each robot broadcasts its ID, status (busy/idle), position, and current goal.  
+- Collision prevention is done via negotiation—robots adjust based on priority or timestamp.
+
+Swarm communication is often event-triggered (i.e., robots only communicate when needed).
+
+🔹 6. Environment Setup  
+The simulated environment mimics a warehouse, segmented into:
+
+- Storage zones: Where packages are kept.  
+- Transit corridors: Main lanes for robot navigation.  
+- Delivery zones: Drop-off or packaging stations.
+
+Zones may be color-coded or marked with visual tags (e.g., AprilTags) for localization.
+
+🔹 7. Software Stack & Simulation  
+- Robot Operating System (ROS) or a custom Python/C++ stack is used.  
+- Simulations are run using Unity or Gazebo for testing multi-agent behaviors before deployment.  
+- Real-time visualization helps monitor robot paths, task status, and overall performance.
+
+The system is designed to test scalability, showing how 5, 10, or more robots can coordinate without centralized control.
+
+🔹 8. Performance & Optimization  
+- Performance is measured using:
+  - Task completion rate.
+  - Average time per delivery.
+  - Robot idle time.
+  - Collision incidents.
+
+- Optimization techniques include:
+  - Load balancing.
+  - Smart routing (avoiding traffic).
+  - Dynamic speed adjustment.
+
+
+the goal locations and robot movements are handled via a combination of grid-based planning and external tracking:
+
+📍 Goal Locations:
+
+The warehouse is modeled as a 2D grid.
+
+Each grid cell represents a zone (e.g., pick-up, drop-off).
+
+Goal positions (e.g., where to pick or place packages) are pre-defined in a shared map and given as coordinates (X, Y) to the robots.
+
+🛰️ Robot Movement Tracking:
+
+The system uses a top-down external camera and computer vision to track each robot's position in real-time.
+
+Each robot is likely tagged with a unique pattern (like ArUco/AprilTag) for easy ID and localization.
+
