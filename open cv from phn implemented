@@ -1,0 +1,26 @@
+import cv2
+
+# The IP Webcam URL for your phone camera feed
+URL = "http://172.20.10.3:8080/video"
+
+# Start video capture
+cap = cv2.VideoCapture(URL)
+
+if not cap.isOpened():
+    print("Error: Cannot open video stream")
+    exit()
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        print("Failed to grab frame")
+        break
+
+    cv2.imshow("Phone Camera Stream", frame)
+
+    # Press 'q' to exit the video stream
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
